@@ -209,14 +209,15 @@ static CCMenuItemSpriteExtra* termButton(const char* text, float w, CCObject* ta
     return CCMenuItemSpriteExtra::create(border, nullptr, target, cb);
 }
 
-class OBPopup : public geode::Popup<> {
+class OBPopup : public geode::Popup {
 protected:
     CCLabelBMFont* m_status = nullptr;
     CCLabelBMFont* m_prompt = nullptr;
     std::string m_msg = "pret.";
     bool m_cursor = true;
 
-    bool setup() override {
+    bool init() {
+        if (!Popup::init(340.f, 230.f)) return false;
         m_bgSprite->setVisible(false);
         CCPoint c = m_mainLayer->getContentSize() / 2; // centre réel du popup
 
@@ -310,7 +311,7 @@ protected:
 public:
     static OBPopup* create() {
         auto ret = new OBPopup();
-        if (ret && ret->initAnchored(340.f, 230.f)) { ret->autorelease(); return ret; }
+        if (ret && ret->init()) { ret->autorelease(); return ret; }
         CC_SAFE_DELETE(ret);
         return nullptr;
     }
