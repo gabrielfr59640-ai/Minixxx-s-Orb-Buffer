@@ -33,7 +33,9 @@ jobs:
         uses: geode-sdk/build-geode-mod@main
         with:
           combine: true
-          sdk: nightly
+          sdk: v5.11.2
+          bindings: vwtfafa/bindings
+          bindings-ref: fix/2.2081-depends
           target: ${{ matrix.config.target }}
 
   package:
