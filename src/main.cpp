@@ -128,8 +128,13 @@ class $modify(OBBase, GJBaseGameLayer) {
 };
 
 class $modify(OBPlayLayer, PlayLayer) {
+#if GEODE_COMP_GD_VERSION >= 22091
     bool init(GJGameLevel* level, bool dontCreateObjects) {
         if (!PlayLayer::init(level, dontCreateObjects)) return false;
+#else
+    bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
+        if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
+#endif
         // nouvel essai de niveau : on repart propre (évite une macro d'un autre niveau)
         g_macro = {};
         g_mode = Mode::Off;
