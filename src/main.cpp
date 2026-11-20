@@ -3,9 +3,8 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/PauseLayer.hpp>
-#include <fstream>
+#include <sstream>
 #include <cmath>
-#include <filesystem>
 
 using namespace geode::prelude;
 
@@ -30,30 +29,39 @@ constexpr float SIM_DT = 1.f / 240.f; // 1 pas de physique
 
 static int frameOf(GJBaseGameLayer* l) { return l->m_gameState.m_currentProgress; }
 
-static std::filesystem::path macroPath() {
+static std::string macroKey() {
     int id = 0;
     if (auto pl = PlayLayer::get()) id = pl->m_level->m_levelID.value();
-    return Mod::get()->getSaveDir() / fmt::format("macro_{}.txt", id);
+    return fmt::format("macro_{}", id);
 }
 
+// La macro est stockée dans les "saved values" du mod (pas de fichier -> compatible partout)
 static void saveMacro() {
-    std::ofstream f(macroPath());
-    for (auto& c : g_macro.clicks) f << "C " << c.frame << ' ' << c.down << ' ' << c.p1 << '\n';
+    std::ostringstream o;
+    for (auto& c : g_macro.clicks) o << "C " << c.frame << ' ' << (int)c.down << ' ' << (int)c.p1 << '\n';
     for (size_t i = 0; i < g_macro.trace.size(); i++)
-        f << "P " << i << ' ' << g_macro.trace[i].x << ' ' << g_macro.trace[i].y << '\n';
+        o << "P " << i << ' ' << g_macro.trace[i].x << ' ' << g_macro.trace[i].y << '\n';
+    Mod::get()->setSavedValue<std::string>(macroKey(), o.str());
 }
 
 static bool loadMacro() {
-    std::ifstream f(macroPath());
-    if (!f) return false;
+    auto data = Mod::get()->getSavedValue<std::string>(macroKey(), "");
+    if (data.empty()) return false;
+    std::istringstream f(data);
     g_macro = {};
     std::string t;
     while (f >> t) {
-        if (t == "C") { Click c{}; int d, p; f >> c.frame >> d >> p; c.down = d; c.p1 = p; g_macro.clicks.push_back(c); }
+        if (t == "C") {
+            Click c{}; int d, p;
+            f >> c.frame >> d >> p;
+            c.down = d != 0; c.p1 = p != 0;
+            g_macro.clicks.push_back(c);
+        }
         else if (t == "P") {
-            size_t i; float x, y; f >> i >> x >> y;
+            size_t i; float x, y;
+            f >> i >> x >> y;
             if (g_macro.trace.size() <= i) g_macro.trace.resize(i + 1);
-            g_macro.trace[i] = {x, y};
+            g_macro.trace[i] = CCPoint(x, y);
         }
     }
     return !g_macro.clicks.empty();
@@ -79,6 +87,7 @@ static int chooseDelay(PlayLayer* pl, int f) {
     int steps = targetFrame - f;
 
     g_sim = true;
+    int cpBefore = pl->m_checkpointArray ? (int)pl->m_checkpointArray->count() : 0;
     auto cp = pl->createCheckpoint();
     int best = 0;
     float bestDist = 1e9f;
@@ -95,7 +104,9 @@ static int chooseDelay(PlayLayer* pl, int f) {
     }
 
     pl->loadFromCheckpoint(cp);
-    pl->removeLastCheckpoint();
+    // on retire le checkpoint temporaire (seulement s'il a été ajouté par createCheckpoint)
+    if (pl->m_checkpointArray && (int)pl->m_checkpointArray->count() > cpBefore)
+        pl->m_checkpointArray->removeLastObject();
     g_sim = false;
     return best;
 }
@@ -128,8 +139,8 @@ class $modify(OBBase, GJBaseGameLayer) {
 };
 
 class $modify(OBPlayLayer, PlayLayer) {
-    bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
-        if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
+    bool init(GJGameLevel* level, bool dontCreateObjects) {
+        if (!PlayLayer::init(level, dontCreateObjects)) return false;
         // nouvel essai de niveau : on repart propre (évite une macro d'un autre niveau)
         g_macro = {};
         g_mode = Mode::Off;
