@@ -5,6 +5,7 @@
 #include <Geode/modify/PauseLayer.hpp>
 #include <sstream>
 #include <cmath>
+#include <algorithm>
 
 using namespace geode::prelude;
 
@@ -67,48 +68,36 @@ static bool loadMacro() {
     return !g_macro.clicks.empty();
 }
 
-// ------------------------------------------------- calcul de la meilleure trajectoire
-// Teste chaque délai de clic (0..maxDelay), simule, compare à la macro, renvoie le meilleur.
+// ------------------------------------------------- calcul de la trajectoire / du délai
+// PlayLayer::loadFromCheckpoint n'existe pas sur iOS (symbole introuvable à l'édition de
+// liens), donc pas de simulation physique : on prédit l'arrivée au point de clic de la macro.
+// Le joueur avance à vitesse (quasi) constante en X : le nombre de frames avant d'atteindre
+// la position du clic enregistré = distance restante / vitesse par frame (relevée dans la macro).
 static int chooseDelay(PlayLayer* pl, int f) {
     int maxDelay = (int)Mod::get()->getSettingValue<int64_t>("max-delay");
-    int look = (int)Mod::get()->getSettingValue<int64_t>("lookahead");
+    int n = (int)g_macro.trace.size();
+    if (n < 3) return 0;
 
-    // clic de la macro le plus proche de la frame actuelle
+    float px = pl->m_player1->getPositionX();
+
+    // prochain clic de la macro encore devant le joueur
     const Click* ref = nullptr;
+    float bestDx = 1e9f;
     for (auto& c : g_macro.clicks) {
-        if (!c.down || !c.p1) continue;
-        if (!ref || std::abs(c.frame - f) < std::abs(ref->frame - f)) ref = &c;
+        if (!c.down || !c.p1 || c.frame < 1 || c.frame >= n - 1) continue;
+        float dx = g_macro.trace[c.frame].x - px;
+        if (dx < -1.f) continue; // déjà dépassé
+        if (dx < bestDx) { bestDx = dx; ref = &c; }
     }
-    if (!ref || std::abs(ref->frame - f) > maxDelay + 30) return 0;
+    if (!ref) return 0;
 
-    int targetFrame = ref->frame + look;
-    if (targetFrame >= (int)g_macro.trace.size() || targetFrame <= f) return 0;
-    CCPoint target = g_macro.trace[targetFrame];
-    int steps = targetFrame - f;
+    // vitesse horizontale (par frame) autour du clic, d'après la macro
+    float speed = (g_macro.trace[ref->frame + 1].x - g_macro.trace[ref->frame - 1].x) / 2.f;
+    if (speed <= 0.01f) return 0;
 
-    g_sim = true;
-    int cpBefore = pl->m_checkpointArray ? (int)pl->m_checkpointArray->count() : 0;
-    auto cp = pl->createCheckpoint();
-    int best = 0;
-    float bestDist = 1e9f;
-
-    for (int d = 0; d <= maxDelay; d++) {
-        pl->loadFromCheckpoint(cp);
-        for (int s = 0; s < steps; s++) {
-            if (s == d) pl->handleButton(true, 1, true);
-            pl->update(SIM_DT);
-            if (pl->m_player1->m_isDead || pl->m_levelEndAnimationStarted) break;
-        }
-        float dist = pl->m_player1->m_isDead ? 1e8f : ccpDistance(pl->m_player1->getPosition(), target);
-        if (dist < bestDist) { bestDist = dist; best = d; }
-    }
-
-    pl->loadFromCheckpoint(cp);
-    // on retire le checkpoint temporaire (seulement s'il a été ajouté par createCheckpoint)
-    if (pl->m_checkpointArray && (int)pl->m_checkpointArray->count() > cpBefore)
-        pl->m_checkpointArray->removeLastObject();
-    g_sim = false;
-    return best;
+    int delay = (int)std::lround(bestDx / speed);
+    if (delay <= 0 || delay > maxDelay) return 0; // pas près de l'orbe : clic normal
+    return delay;
 }
 
 // ------------------------------------------------------------------------- hooks
